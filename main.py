@@ -1,9 +1,13 @@
+#!/usr/bin/python3
+
+from re import M
 from pygame.locals import *
 from operator import add, sub
 import pygame
 import sys
 import math
 import random
+import numpy as np
 
 pygame.init()
 
@@ -12,6 +16,7 @@ WINDOW_SIZE = (1200, 800) # Width x Height in pixels
 NUM_RAYS = 150 # Must be between 1 and 360
 SOLID_RAYS = False # Can be somewhat glitchy. For best results, set NUM_RAYS to 360
 NUM_WALLS = 5 # The amount of randomly generated walls
+PIXEL_PER_MM = 10
 #------------------
 
 screen = pygame.display.set_mode(WINDOW_SIZE)
@@ -23,6 +28,7 @@ running = True
 rays = []
 walls = []
 particles = []
+beams = []
 
 class Ray:
     def __init__(self, x, y, angle):
@@ -60,6 +66,58 @@ class Ray:
             y = y1 + t * (y2 - y1)
             collidePos = [x, y]
             return collidePos
+
+class Beam:
+    def __init__(self,x,y,z,visible=True,color='green',width=1) -> None:
+        self.x = x
+        self.y = y
+        self.z = z
+        self.color = color
+        self.width = width
+        self.points = []
+        self.visible=visible
+
+    def update(self, mx, my, mz,visible=True):
+        self.x = mx
+        self.y = my
+        self.z = mz
+        self.visible = visible
+
+    def draw(self):
+        V_LED = 4.0
+        I_LED = 5.0
+
+        c_lambda = 0.398
+
+        def beer_lambert(z):
+            return np.exp(-1*c_lambda*z)
+
+        def E_LED(theta,z):
+            return (V_LED*I_LED*beer_lambert(z)*np.power(np.cos(theta),3))/z**2
+        
+        def polarToCartesian(r,theta):
+            theta += np.pi/2
+            x = r*np.cos(theta)
+            y = r*np.sin(theta)
+            return (x,y)
+
+        # 60 deg half angle 
+        # thetas = np.arange(-np.pi/2, np.pi/2,0.01)
+        thetas = np.arange(-np.pi/3, np.pi/3,0.01)
+        z = self.z
+        self.points = [(self.x,self.y)]
+        centerIntensity = E_LED(0,z)
+        for theta in thetas:    
+            rayIntensity = E_LED(theta,z)
+            r = (rayIntensity/centerIntensity)*z
+            x, y = polarToCartesian(r,theta)
+            x *= PIXEL_PER_MM
+            y *= PIXEL_PER_MM
+            x += self.x
+            y += self.y
+            self.points.append((x,y))
+        if self.visible:
+            pygame.draw.polygon(display,self.color,self.points,self.width)
 
 class Wall:
     def __init__(self, start_pos, end_pos, color = 'white'):
@@ -118,22 +176,30 @@ def generateWalls():
         end_y = random.randint(0, WINDOW_SIZE[1])
         walls.append(Wall((start_x, start_y), (end_x, end_y)))
 
-def draw():
-    display.fill((0, 0, 0))
+def generateBeams():
+    beams.append(Beam(WINDOW_SIZE[0]/2,0,50))
 
-    for wall in walls:
-        wall.draw()
+def draw():
+    display.fill((255, 255, 255))
+
+    # for wall in walls:
+    #     wall.draw()
 
     for particle in particles:
         particle.draw()
 
-    drawRays([ray for ray in rays], [wall for wall in walls])
+    # drawRays([ray for ray in rays], [wall for wall in walls])
+
+    for beam in beams:
+        beam.draw()
 
     screen.blit(display, (0, 0))
 
     pygame.display.update()
 
+generateBeams()
 generateWalls()
+z_wheel = 10
 while running:
     mx, my = pygame.mouse.get_pos()
     for event in pygame.event.get():
@@ -145,9 +211,21 @@ while running:
             # Re-randomize walls on Space
             if event.key == pygame.K_SPACE:
                generateWalls()
+        
+        if event.type == MOUSEBUTTONDOWN:
+            if event.button == 4:
+                if z_wheel < WINDOW_SIZE[0]:
+                    z_wheel += 1
+            elif event.button == 5:
+                if z_wheel > 1:
+                    z_wheel -= 1
+            else:
+                beams.append(Beam(mx,my,z_wheel,True))
 
     for ray in rays:
         ray.update(mx, my)
+
+    beams[0].update(mx,my,z_wheel,pygame.mouse.get_focused())
 
     draw()
 
