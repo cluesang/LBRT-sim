@@ -68,19 +68,21 @@ class Ray:
             return collidePos
 
 class Beam:
-    def __init__(self,x,y,z,visible=True,color='green',width=1) -> None:
+    def __init__(self,x,y,z,direction='south',visible=True,color='green',width=1) -> None:
         self.x = x
         self.y = y
         self.z = z
+        self.direction = direction
         self.color = color
         self.width = width
         self.points = []
         self.visible=visible
 
-    def update(self, mx, my, mz,visible=True):
+    def update(self, mx, my, mz,direction='south',visible=True):
         self.x = mx
         self.y = my
         self.z = mz
+        self.direction = direction
         self.visible = visible
 
     def draw(self):
@@ -89,36 +91,63 @@ class Beam:
 
         c_lambda = 0.398
 
+        def beam_angle(half_angle):
+            return 4*np.pi*(np.sin(half_angle/2)**2)
+
         def beer_lambert(z):
             return np.exp(-1*c_lambda*z)
 
         def E_LED(theta,z):
-            return (V_LED*I_LED*beer_lambert(z)*np.power(np.cos(theta),3))/z**2
+            # return (V_LED*I_LED*beer_lambert(z)*np.power(np.cos(theta),3))/z**2
+            return (V_LED*I_LED*beer_lambert(z)*(np.cos(theta)**2))/z**2
         
         def polarToCartesian(r,theta):
-            theta += np.pi/2
+            offset = 0
+            if(self.direction == 'south'):
+                offset = np.pi/2
+            elif(self.direction == 'east'):
+                offset = 0
+            elif(self.direction == 'north'):
+                offset = -np.pi/2
+            elif(self.direction == 'west'):
+                offset = -np.pi
+            theta += offset
             x = r*np.cos(theta)
             y = r*np.sin(theta)
             return (x,y)
 
         # 60 deg half angle 
         # thetas = np.arange(-np.pi/2, np.pi/2,0.01)
-        thetas = np.arange(-np.pi/3, np.pi/3,0.01)
+        thetas = np.arange(-np.pi/3, np.pi/3,0.001)
         z = self.z
         self.points = [(self.x,self.y)]
-        centerIntensity = E_LED(0,z)
+        pointColorIntensities = [1.0]
+        # centerIntensity = E_LED(0,z)
+        centerIrradiance = E_LED(0,z)
+        # print("center irradiance: ", centerIntensity)
         for theta in thetas:    
-            rayIntensity = E_LED(theta,z)
-            r = (rayIntensity/centerIntensity)*z
-            x, y = polarToCartesian(r,theta)
+            # rayIntensity = E_LED(theta,z)
+            pointIrradiance = E_LED(theta,z)
+            percentIrradiance = pointIrradiance/centerIrradiance
+            pointColorIntensities.append(percentIrradiance)
+            # r = (rayIntensity/centerIntensity)*z
+            # print("equi irradiance: ", E_LED(theta,r))
+            # x, y = polarToCartesian(r,theta)
+            x, y = polarToCartesian((z/np.cos(theta)),theta)
             x *= PIXEL_PER_MM
             y *= PIXEL_PER_MM
             x += self.x
             y += self.y
             self.points.append((x,y))
-        if self.visible:
-            pygame.draw.polygon(display,self.color,self.points,self.width)
-
+        
+        for i,point in enumerate(self.points):
+            opacity = 255*pointColorIntensities[i]
+            elem = pygame.draw.aaline(display,(0,255,0,10),(self.x,self.y),point)
+        # if self.visible:
+            # pygame.draw.aalines(display,self.color,self.points)
+            # beam equipotential bounary
+            # pygame.draw.polygon(display,(0,255,0),self.points,self.width)
+            
 class Wall:
     def __init__(self, start_pos, end_pos, color = 'white'):
         self.start_pos = start_pos
@@ -177,10 +206,13 @@ def generateWalls():
         walls.append(Wall((start_x, start_y), (end_x, end_y)))
 
 def generateBeams():
+    beamParams = []
+    # the first beam will follow the mouse
     beams.append(Beam(WINDOW_SIZE[0]/2,0,50))
 
+
 def draw():
-    display.fill((255, 255, 255))
+    display.fill((3, 252, 252))
 
     # for wall in walls:
     #     wall.draw()
@@ -198,8 +230,9 @@ def draw():
     pygame.display.update()
 
 generateBeams()
-generateWalls()
+# generateWalls()
 z_wheel = 10
+temp_direction = ''
 while running:
     mx, my = pygame.mouse.get_pos()
     for event in pygame.event.get():
@@ -211,6 +244,14 @@ while running:
             # Re-randomize walls on Space
             if event.key == pygame.K_SPACE:
                generateWalls()
+            if event.key == K_UP:
+                temp_direction = 'north'
+            if event.key == K_LEFT:
+                temp_direction = 'west'
+            if event.key == K_RIGHT:
+                temp_direction = 'east'
+            if event.key == K_DOWN:
+                temp_direction = 'south'
         
         if event.type == MOUSEBUTTONDOWN:
             if event.button == 4:
@@ -220,12 +261,12 @@ while running:
                 if z_wheel > 1:
                     z_wheel -= 1
             else:
-                beams.append(Beam(mx,my,z_wheel,True))
+                beams.append(Beam(mx,my,z_wheel,temp_direction,True))        
 
     for ray in rays:
         ray.update(mx, my)
 
-    beams[0].update(mx,my,z_wheel,pygame.mouse.get_focused())
+    beams[0].update(mx,my,z_wheel,temp_direction,pygame.mouse.get_focused())
 
     draw()
 
